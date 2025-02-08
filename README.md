@@ -49,7 +49,7 @@ With a focus on **performance, security, and scalability**, this backend is buil
 ## 🔥 Getting Started  
 ### 1️⃣ Clone the Repository  
 ```bash  
-git clone https://github.com/yourusername/recruiter-website-backend.git  
+git clone https://github.com/nikhilij/recruiter-website-backend.git  
 cd recruiter-website-backend  
 ```
 
