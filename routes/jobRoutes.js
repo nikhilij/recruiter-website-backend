@@ -29,6 +29,26 @@ module.exports = (io) => {
     }
   });
 
+  /* ------------------ Get Job Recommendations (Job Seeker) ------------------ */
+  router.get("/recommend", authMiddleware, async (req, res) => {
+    try {
+      const user = req.user;
+      if (!user.resumeText) return res.status(400).json({ message: "Upload a resume to get recommendations." });
+
+      // Fetch all jobs
+      const jobs = await Job.find();
+      if (jobs.length === 0) return res.json({ message: "No jobs available." });
+
+      // Compute job matches
+      const matchedJobs = computeSimilarity(user.resumeText, jobs);
+
+      res.json({ recommendedJobs: matchedJobs });
+    } catch (err) {
+      console.error("Job recommendation error:", err);
+      res.status(500).json({ message: "Server Error" });
+    }
+  });
+
   /* ---------------------- Create a new job (Recruiter Only) ---------------------- */
   router.post("/", authMiddleware, roleMiddleware(["recruiter"]), async (req, res) => {
     try {

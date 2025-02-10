@@ -3,19 +3,29 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { check, validationResult } = require("express-validator");
 const User = require("../models/User");
+const { authLimiter } = require("../middleware/rateLimitMiddleware");
 require("dotenv").config();
 
 const router = express.Router();
 
-// @route   POST /api/auth/register
-// @desc    Register new user (Recruiter / Job Seeker)
+/* ---------------------------- Generate Tokens ---------------------------- */
+const generateTokens = (user) => {
+  const accessToken = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: "15m" });
+  const refreshToken = jwt.sign({ id: user._id }, process.env.JWT_REFRESH_SECRET, { expiresIn: "7d" });
 
+  return { accessToken, refreshToken };
+};
+
+/* ---------------------------- Register Route ---------------------------- */
 router.post(
   "/register",
+  authLimiter,
   [
     check("name", "Name is required").not().isEmpty(),
     check("email", "Email is required").isEmail(),
-    check("password", "Password must be at least 6 characters long").isLength({ min: 5 }),
+    check("password", "Password must be at least 6 characters long").isLength({
+      min: 6,
+    }),
     check("role", "Role must be recruiter or job_seeker").isIn(["recruiter", "job_seeker"]),
   ],
   async (req, res) => {
@@ -30,20 +40,21 @@ router.post(
       let user = await User.findOne({ email });
       if (user) return res.status(400).json({ msg: "User already exists" });
 
-      // otherwise regster
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(password, salt);
-
-      //create user
 
       user = new User({ name, email, password: hashedPassword, role });
       await user.save();
 
-      // generate jwt token
-      const payload = { user: { id: user.id, role: user.role } };
-      const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "1hr" });
+      const tokens = generateTokens(user);
 
-      res.json({ token, message: "Registration Successfull" });
+      res.cookie("refreshToken", tokens.refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "Strict",
+      });
+
+      res.status(201).json({ accessToken: tokens.accessToken, message: "Registration Successful" });
     } catch (err) {
       console.error(err);
       res.status(500).send("Server Error");
@@ -51,11 +62,10 @@ router.post(
   }
 );
 
-// @route   POST /api/auth/login
-// @desc    Authenticate user and get token
-
+/* ---------------------------- Login Route ---------------------------- */
 router.post(
   "/login",
+  authLimiter,
   [check("email", "Please Include a valid Email").isEmail(), check("password", "Password is required").exists()],
   async (req, res) => {
     const errors = validationResult(req);
@@ -68,19 +78,52 @@ router.post(
       if (!user) return res.status(400).json({ msg: "Invalid Credentials" });
 
       const isMatch = await bcrypt.compare(password, user.password);
-      if (!isMatch) return res.status(400).json({ msg: "Invalid Password check your email/password" });
+      if (!isMatch) return res.status(400).json({ msg: "Invalid Email/Password" });
 
-      // generate jwt token
+      const tokens = generateTokens(user);
 
-      const payload = { user: { id: user.id, role: user.role } };
-      const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "1h" });
+      res.cookie("refreshToken", tokens.refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "Strict",
+      });
 
-      res.json({ token });
+      res.json({ accessToken: tokens.accessToken });
     } catch (err) {
       console.log(err);
       res.status(500).send("Server Error");
     }
   }
 );
+
+/* ---------------------------- Refresh Token Route ---------------------------- */
+router.post("/refresh-token", async (req, res) => {
+  const refreshToken = req.cookies.refreshToken;
+  if (!refreshToken) return res.status(401).json({ message: "Refresh Token Required" });
+
+  try {
+    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
+    const user = await User.findById(decoded.id);
+    if (!user) return res.status(401).json({ message: "Invalid Refresh Token" });
+
+    const tokens = generateTokens(user);
+
+    res.cookie("refreshToken", tokens.refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "Strict",
+    });
+
+    res.json({ accessToken: tokens.accessToken });
+  } catch (err) {
+    res.status(403).json({ message: "Invalid or Expired Refresh Token" });
+  }
+});
+
+/* ---------------------------- Logout Route ---------------------------- */
+router.post("/logout", (req, res) => {
+  res.clearCookie("refreshToken", { httpOnly: true, secure: process.env.NODE_ENV === "production" });
+  res.json({ message: "Logged out successfully" });
+});
 
 module.exports = router;

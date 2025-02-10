@@ -2,11 +2,12 @@ const express = require("express");
 const cors = require("cors");
 const http = require("http");
 const connectDB = require("./config/db");
-const authMiddleware = require("./middleware/authMiddleware");
-const roleMiddleware = require("./middleware/roleMiddleware");
-const upload = require("./middleware/uploadMiddleware");
+// const authMiddleware = require("./middleware/authMiddleware");
+// const roleMiddleware = require("./middleware/roleMiddleware");
+// const upload = require("./middleware/uploadMiddleware");
 const socketIO = require("socket.io");
 const cron = require("node-cron");
+const helmet = require("helmet");
 require("dotenv").config(); // Correct placement
 
 connectDB(); // Connect to DB
@@ -24,6 +25,11 @@ const io = socketIO(server, {
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use(helmet()); // Adds security headers
+
+/*  Cybersecurity terms 🥲🥲
+✅ This protects against common vulnerabilities like XSS, clickjacking, and MIME sniffing. */
+
 
 const onlineUsers = new Map();
 
@@ -66,28 +72,25 @@ app.use("/api/admin", require("./routes/adminRoute"));
 
 app.use("/uploads", express.static("uploads")); // Serve uploaded files if needed
 
-cron.schedule("0 9 * * MON", async () => {
-  console.log("Sending weekly job digest...");
+/* --------------------- Cron Job: Send Job Alerts Every 24 Hours --------------------- */
+cron.schedule("0 0 * * *", async () => {
+  console.log("🔄 Running job alert cron job...");
 
   try {
-    const jobs = await Job.find({ createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } });
-    if (jobs.length === 0) return;
+    const users = await User.find({ role: "job_seeker", resumeText: { $exists: true } });
 
-    const jobSeekers = await User.find({ role: "job_seeker" });
+    for (const user of users) {
+      const jobs = await Job.find();
+      const matchedJobs = computeSimilarity(user.resumeText, jobs);
 
-    jobSeekers.forEach((user) => {
-      const jobList = jobs.map((job) => `<li>${job.title} at ${job.company}</li>`).join("");
-      sendEmail(
-        user.email,
-        "Weekly Job Digest",
-        "Here are the latest job postings from this week.",
-        `<p>Here are the latest jobs:</p><ul>${jobList}</ul>`
-      );
-    });
+      if (matchedJobs.length > 0) {
+        await sendJobAlert(user.email, matchedJobs);
+      }
+    }
 
-    console.log("Job digest sent.");
+    console.log("✅ Job alerts sent successfully.");
   } catch (err) {
-    console.error("Error sending job digest:", err);
+    console.error("❌ Error in job alert cron job:", err);
   }
 });
 
