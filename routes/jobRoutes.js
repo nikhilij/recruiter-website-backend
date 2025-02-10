@@ -1,114 +1,160 @@
 const express = require("express");
 const Job = require("../models/Job");
+const User = require("../models/User");
+const sendEmail = require("../config/email");
 const authMiddleware = require("../middleware/authMiddleware");
 const roleMiddleware = require("../middleware/roleMiddleware");
 
-const router = express.Router();
+module.exports = (io) => {
+  const router = express.Router();
 
-/* ---------------------------- Get all jobs (Public) ---------------------------- */
-router.get("/", async (req, res) => {
-  try {
-    const jobs = await Job.find().populate("recruiter", "name email");
-    res.json(jobs);
-  } catch (err) {
-    res.status(500).json({ message: "Server Error" });
-  }
-});
+  /* ---------------------------- Get all jobs (Public) ---------------------------- */
+  router.get("/", async (req, res) => {
+    try {
+      const jobs = await Job.find().populate("recruiter", "name email");
+      res.json(jobs);
+    } catch (err) {
+      res.status(500).json({ message: "Server Error" });
+    }
+  });
 
-/* ---------------------------- Get job by ID (Public) ---------------------------- */
-router.get("/:id", async (req, res) => {
-  try {
-    const job = await Job.findById(req.params.id).populate("recruiter", "name email");
-    if (!job) return res.status(404).json({ message: "Job Not Found" });
-    res.json(job);
-  } catch (err) {
-    res.status(500).json({ message: "Server Error" });
-  }
-});
+  /* ---------------------------- Get job by ID (Public) ---------------------------- */
+  router.get("/:id", async (req, res) => {
+    try {
+      const job = await Job.findById(req.params.id).populate("recruiter", "name email");
+      if (!job) return res.status(404).json({ message: "Job Not Found" });
+      res.json(job);
+    } catch (err) {
+      res.status(500).json({ message: "Server Error" });
+    }
+  });
 
-/* ---------------------- Create a new job (Recruiter Only) ---------------------- */
-router.post("/", authMiddleware, roleMiddleware(["recruiter"]), async (req, res) => {
-  try {
-    const { title, description, company, location, salary, category, experienceLevel, type, status, deadline } = req.body;
+  /* ---------------------- Create a new job (Recruiter Only) ---------------------- */
+  router.post("/", authMiddleware, roleMiddleware(["recruiter"]), async (req, res) => {
+    try {
+      const { title, description, company, location, salary, category, experienceLevel, type, status, deadline } =
+        req.body;
 
-    const job = new Job({
-      title,
-      description,
-      company,
-      location,
-      salary,
-      category,
-      experienceLevel,
-      type,
-      status: status || "Active",
-      deadline,
-      recruiter: req.user.id,
-      postedBy: req.user.id
-    });
+      const job = new Job({
+        title,
+        description,
+        company,
+        location,
+        salary,
+        category,
+        experienceLevel,
+        type,
+        status: status || "Active",
+        deadline,
+        recruiter: req.user.id,
+        postedBy: req.user.id,
+      });
 
-    await job.save();
-    res.status(201).json({ message: "Job Created", job });
-  } catch (err) {
-    console.error("Error creating job:", err);
-    res.status(500).json({ message: "Server Error" });
-  }
-});
+      await job.save();
 
-/* ---------------------- Update a job (Recruiter Only) ---------------------- */
-router.put("/:id", authMiddleware, roleMiddleware(["recruiter"]), async (req, res) => {
-  try {
-    let job = await Job.findById(req.params.id);
-    if (!job) return res.status(404).json({ message: "Job not found" });
+      // emit push notification to all connecte job seekers
+      io.emit("newJob", { message: `New job posted : ${title}`, job });
 
-    if (job.postedBy.toString() !== req.user.id)
-      return res.status(403).json({ message: "Unauthorized to edit this job" });
+      // Find users who subscribed to this job category
+      const jobSeekers = await User.find({ role: "job_seeker", interestedCategories: category });
 
-    // Allow only certain fields to be updated
-    const allowedUpdates = ["title", "description", "company", "location", "salary", "category", "experienceLevel", "type", "status", "deadline"];
-    const updates = Object.keys(req.body).reduce((obj, key) => {
-      if (allowedUpdates.includes(key)) obj[key] = req.body[key];
-      return obj;
-    }, {});
+      jobSeekers.forEach((user) => {
+        sendEmail(
+          user.email,
+          `New Job Alert: ${title}`,
+          `A new job "${title}" has been posted in ${category}.`,
+          `<p>A new job <strong>${title}</strong> at <strong>${company}</strong> has been posted in ${category}.</p>`
+        );
+      });
 
-    job = await Job.findByIdAndUpdate(req.params.id, updates, { new: true });
-    res.json(job);
-  } catch (err) {
-    res.status(500).json({ message: "Server Error" });
-  }
-});
+      res.status(201).json({ message: "Job Created", job });
+    } catch (err) {
+      console.error("Error creating job:", err);
+      res.status(500).json({ message: "Server Error" });
+    }
+  });
 
-/* ---------------------- Delete a job (Recruiter Only) ---------------------- */
-router.delete("/:id", authMiddleware, roleMiddleware(["recruiter"]), async (req, res) => {
-  try {
-    const job = await Job.findById(req.params.id);
-    if (!job) return res.status(404).json({ message: "Job not found" });
+  /* ---------------------- Update a job (Recruiter Only) ---------------------- */
+  router.put("/:id", authMiddleware, roleMiddleware(["recruiter"]), async (req, res) => {
+    try {
+      let job = await Job.findById(req.params.id);
+      if (!job) return res.status(404).json({ message: "Job not found" });
 
-    if (job.postedBy.toString() !== req.user.id)
-      return res.status(403).json({ message: "Unauthorized to delete this job" });
+      if (job.postedBy.toString() !== req.user.id)
+        return res.status(403).json({ message: "Unauthorized to edit this job" });
 
-    await job.deleteOne();
-    res.json({ message: "Job deleted successfully" });
-  } catch (err) {
-    res.status(500).json({ message: "Server Error" });
-  }
-});
+      // Allow only certain fields to be updated
+      const allowedUpdates = [
+        "title",
+        "description",
+        "company",
+        "location",
+        "salary",
+        "category",
+        "experienceLevel",
+        "type",
+        "status",
+        "deadline",
+      ];
+      const updates = Object.keys(req.body).reduce((obj, key) => {
+        if (allowedUpdates.includes(key)) obj[key] = req.body[key];
+        return obj;
+      }, {});
 
-/* ---------------------- Apply for a job (Job Seeker Only) ---------------------- */
-router.post("/apply/:jobId", authMiddleware, roleMiddleware(["job_seeker"]), async (req, res) => {
-  try {
-    const job = await Job.findById(req.params.jobId);
-    if (!job) return res.status(404).json({ message: "Job not found" });
+      job = await Job.findByIdAndUpdate(req.params.id, updates, { new: true });
+      res.json(job);
+    } catch (err) {
+      res.status(500).json({ message: "Server Error" });
+    }
+  });
 
-    const user = req.user.id;
-    if (job.applicants.includes(user))
-      return res.status(400).json({ message: "Already applied for this job" });
+  /* ---------------------- Delete a job (Recruiter Only) ---------------------- */
+  router.delete("/:id", authMiddleware, roleMiddleware(["recruiter"]), async (req, res) => {
+    try {
+      const job = await Job.findById(req.params.id);
+      if (!job) return res.status(404).json({ message: "Job not found" });
 
-    job.applicants.push(user);
-    await job.save();
-    res.json({ message: "Job application successful" });
-  } catch (err) {
-    res.status(500).json({ message: "Server Error" });
-  }
-});
+      if (job.postedBy.toString() !== req.user.id)
+        return res.status(403).json({ message: "Unauthorized to delete this job" });
 
-module.exports = router;
+      await job.deleteOne();
+      res.json({ message: "Job deleted successfully" });
+    } catch (err) {
+      res.status(500).json({ message: "Server Error" });
+    }
+  });
+
+  /* ---------------------- Apply for a job (Job Seeker Only) ---------------------- */
+  router.post("/apply/:jobId", authMiddleware, roleMiddleware(["job_seeker"]), async (req, res) => {
+    try {
+      const job = await Job.findById(req.params.jobId).populate("recruiter", "name email");
+      if (!job) return res.status(404).json({ message: "Job not found" });
+
+      const user = req.user.id;
+      if (job.applicants.includes(user)) return res.status(400).json({ message: "Already applied for this job" });
+
+      job.applicants.push(user);
+      await job.save();
+
+      // Notify recruiter about new job application
+      io.to(job.recruiter.toString()).emit("jobApplication", {
+        message: `New application for ${job.title}`,
+        applicantId: user,
+      });
+
+      // Send Email Notification to Recruiter
+      sendEmail(
+        job.recruiter.email,
+        `New Application for ${job.title}`,
+        `A new candidate has applied for your job "${job.title}".`,
+        `<p>A new candidate has applied for your job <strong>${job.title}</strong>.</p>`
+      );
+
+      res.json({ message: "Job application successful" });
+    } catch (err) {
+      res.status(500).json({ message: "Server Error" });
+    }
+  });
+
+  return router;
+};
