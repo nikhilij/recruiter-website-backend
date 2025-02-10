@@ -1,7 +1,6 @@
 const multer = require("multer");
 const path = require("path");
 
-// Storage engine: Save files temporarily
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, "uploads/"); // Ensure 'uploads' folder exists
@@ -11,7 +10,6 @@ const storage = multer.diskStorage({
   },
 });
 
-// File type validation
 const fileFilter = (req, file, cb) => {
   const fileTypes = /pdf|docx|doc|txt/;
   const extname = fileTypes.test(path.extname(file.originalname).toLowerCase());

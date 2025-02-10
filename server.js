@@ -1,9 +1,11 @@
 const express = require("express");
 const cors = require("cors");
+const http = require("http");
 const connectDB = require("./config/db");
 const authMiddleware = require("./middleware/authMiddleware");
 const roleMiddleware = require("./middleware/roleMiddleware");
-const socketIo = require("socket.io");
+const upload = require("./middleware/uploadMiddleware");
+const socketIO = require("socket.io");
 const cron = require("node-cron");
 require("dotenv").config(); // Correct placement
 
@@ -29,7 +31,7 @@ io.on("connection", (socket) => {
   console.log(`New client connected: ${socket.id}`);
 
   //store user connection
-  socket.io("user_connected", (userId) => {
+  socket.on("user_connected", (userId) => {
     onlineUsers.set(userId, socket.id);
     socket.join(userId);
   });
