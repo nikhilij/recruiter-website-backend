@@ -54,6 +54,14 @@ router.post(
         sameSite: "Strict",
       });
 
+      // Set JWTs as HTTP-only cookies
+      res.cookie("accessToken", tokens.accessToken, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "Strict",
+        maxAge: 15 * 60 * 1000,
+      });
+
       res.status(201).json({ accessToken: tokens.accessToken, message: "Registration Successful" });
     } catch (err) {
       console.error(err);
@@ -86,6 +94,13 @@ router.post(
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
         sameSite: "Strict",
+      });
+
+      res.cookie("accessToken", tokens.accessToken, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "Strict",
+        maxAge: 15 * 60 * 1000,
       });
 
       res.json({ accessToken: tokens.accessToken });
@@ -122,6 +137,7 @@ router.post("/refresh-token", async (req, res) => {
 
 /* ---------------------------- Logout Route ---------------------------- */
 router.post("/logout", (req, res) => {
+  res.clearCookie("accessToken", { httpOnly: true, secure: process.env.NODE_ENV === "production" });
   res.clearCookie("refreshToken", { httpOnly: true, secure: process.env.NODE_ENV === "production" });
   res.json({ message: "Logged out successfully" });
 });

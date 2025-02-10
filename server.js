@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const http = require("http");
 const connectDB = require("./config/db");
+const cookieParser = require("cookie-parser");
 // const authMiddleware = require("./middleware/authMiddleware");
 // const roleMiddleware = require("./middleware/roleMiddleware");
 // const upload = require("./middleware/uploadMiddleware");
@@ -23,13 +24,13 @@ const io = socketIO(server, {
 });
 
 // Middleware
-app.use(cors());
+app.use(cors({origin:process.env.CLIENT_URL,credentials:true})); // Enable cookies across origins
 app.use(express.json());
 app.use(helmet()); // Adds security headers
+app.use(cookieParser());
 
 /*  Cybersecurity terms 🥲🥲
 ✅ This protects against common vulnerabilities like XSS, clickjacking, and MIME sniffing. */
-
 
 const onlineUsers = new Map();
 
